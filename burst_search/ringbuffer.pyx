@@ -5,7 +5,7 @@ cimport cython
 
 np.import_array()
 
-# These must match prototypes in src/dedisperse.h
+# These must match prototypes in src/ringbuffer.h
 DTYPE = np.float32
 ctypedef np.float32_t DTYPE_t
 
@@ -95,21 +95,14 @@ class RingBuffer(Transformer):
 
 		self._chunk_length = chunk_length
 		self._buffer_length = buffer_length
+		self._ringt0 = 0
 
-	def __call__(self, np.ndarray[ndim=2, dtype=DTYPE_t] data1 not None):
-		cdef int nfreq = self._nfreq
+	def get(self):
 
-		data2 = np.empty(shape=(nfreq, 0), dtype=DTYPE)
-
-		if data1.shape[0] != data2.shape[0] or data1.shape[0] != self.nfreq:
-			msg = ("Input data arrays must have frequency axes with length"
-				   " nfreq=%d." % self.nfreq)
-			raise ValueError(msg)
-
-
+	def __call__(self, np.ndarray[ndim=2, dtype=DTYPE_t] data1 not None):\
 		cdef:
-			int ntime1 = data1.shape[1]
-			int ntime2 = data2.shape[1]
+			int nfreq = self._nfreq
+			int ntime = data1.shape[1]
 
 			float delta_t = self.delta_t
 			float freq0 = self.freq0
@@ -122,17 +115,16 @@ class RingBuffer(Transformer):
 				out = np.empty(shape=(ndm, ntime1), dtype=DTYPE)
 		chan_map = self._chan_map
 
-		cdef int ntime_out = burst_dm_transform(
+		cdef int ntime_out = add_to_ring(
 			<DTYPE_t *> data1.data,
-			<DTYPE_t *> data2.data,
 			<CM_DTYPE_t *> chan_map.data,
 			<DTYPE_t *> out.data,
-			ntime1,
-			ntime2,
+			<DTYPE_t *> self._ring_buffer.data,
+			chunk_size,
+			ntime,
 			delta_t,
 			nfreq,
 			freq0,
 			delta_f,
 			depth,
-			jon,
 			)
