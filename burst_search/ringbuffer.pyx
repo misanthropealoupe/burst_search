@@ -15,7 +15,7 @@ ctypedef np.int64_t CM_DTYPE_t
 #ctypedef extern struct Peak;
 
 # C prototypes.
-cdef extern void add_to_ring(DTYPE_t * indata, CM_DTYPE_t *chan_map,
+cdef extern void add_to_ring(DTYPE_t * indata, DTYPE_t * outdata, CM_DTYPE_t *chan_map,
 		DTYPE_t *outdata, int ring_t0, int chunk_size, int ntime, float delta_t, size_t nfreq,
 		float freq0, float delta_f, int depth)
 
@@ -202,8 +202,9 @@ class RingBuffer(object):
 			depth,
 			)
 
-		#save the state of ring0
+		#save the state of ring
 		self._ringt0 = ringt0
+		self._ring_buffer = ring_buffer
 
 		dm_data = np.ascontiguousarray(out[:,:ntime])
 		spec_data = np.ascontiguousarray(data[:, :ntime])
