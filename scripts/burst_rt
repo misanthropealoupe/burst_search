@@ -11,6 +11,7 @@ import h5py
 from burst_search import guppi
 from multiprocessing import Process
 from datasource import FileChimeSource
+from ringbuffer import RingBuffer
 import search
 
 # Command line arguments.
