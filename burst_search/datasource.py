@@ -16,6 +16,13 @@ class RtChimeSource(DataSource):
 
 class FileChimeSource(DataSource):
 	frame_cadence = 2.56e-6
+	def decode(data):
+		cdata = np.zeros(data.shape + (2,), dtype=np.int8)
+		cdata[..., 0] = (data / 16).view(np.int8) - 8
+		cdata[..., 1] = (data % 16).view(np.int8) - 8
+		cdata = cdata.reshape((-1,) + cdata.shape[2:])
+		return cdata
+
 	def __init__(self, desired_cadence, dat_path):
 		DataSource(chunk_size)
 		self._datfile = open(dat_path,'r')
@@ -44,8 +51,10 @@ class FileChimeSource(DataSource):
 		nframes = self.nframes
 		sumsqr = np.zeros((self.nfreq, num_t),dtype=np.float32)
 		for i in xrange(0,num_t):
-			raw = get_chunk()['data']
-			sumsqr[:,i] = np.sum(np.sum(np.sum(np.square(raw),axis=0),axis=0),axis=1)
+			dat = get_chunk()['data']
+			raw = decode(dat)
+			del dat
+			sumsqr[:,i] = np.sum(np.sum(np.sum(np.square(raw),axis=0),axis=2),axis=1)
 		return sumsqr
 
 	def set_num_packs(desired_cadence):
