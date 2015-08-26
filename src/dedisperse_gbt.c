@@ -1451,6 +1451,31 @@ Peak find_peak(Data *dat)
   return best;
 }
 /*--------------------------------------------------------------------------------*/
+//Assumes descending triangular format
+size_t find_peak_wrapper_triangle(float *data, int nchan, int ndata, float *peak_snr, int *peak_channel, int *peak_sample, int *peak_duration)
+{
+  Data dat;
+  float **mat=(float **)malloc(sizeof(float *)*nchan);
+  //Assumes a rectangular matrix with a triangular
+  //zero fill
+  for (int i=0;i<nchan;i++)
+    mat[i]=data+i*ndata;
+  dat.data=mat;
+  //this is the only difference between the other method
+  //definitely cleaner to pass as a parameter
+  dat.ndata=ndata - i;
+  dat.nchan=nchan;
+  Peak best=find_peak(&dat);
+  free(dat.data); //get rid of the pointer array
+  *peak_snr=best.snr;
+  *peak_channel=best.dm_channel;
+  //starting sample of the burst
+  *peak_sample=best.ind*(1<<best.depth);
+  *peak_duration=best.duration*(1<<best.depth);
+  return 0;
+
+}
+/*--------------------------------------------------------------------------------*/
 size_t find_peak_wrapper(float *data, int nchan, int ndata, float *peak_snr, int *peak_channel, int *peak_sample, int *peak_duration)
 {
   Data dat;

@@ -6,7 +6,6 @@
 #include <assert.h>
 #include <omp.h>
 #include "dedisperse_gbt.h"
-#include "dedisperse.h"
 
 #ifndef max
   #define max( a, b ) ( ((a) > (b)) ? (a) : (b) )
@@ -22,7 +21,77 @@
 #define THREAD 8
 #define OMP_THREADS 8
 
-extern typedef struct Peak;
+//extern typedef struct Peak;
+
+// For allocating output buffer.
+size_t burst_get_num_dispersions(size_t nfreq, float freq0,
+        float delta_f, int depth) {
+  return get_nchan_from_depth(depth);
+}
+
+// Return minimum *depth* parameter required to achieve given maximum DM.
+int burst_depth_for_max_dm(float max_dm, float delta_t, size_t nfreq, float freq0,
+        float delta_f) {
+  int depth=2;
+  int imax=20;
+  int i=0;
+  while ((get_diagonal_dm_simple(freq0,freq0+nfreq*delta_f,delta_t,depth)<max_dm)&&(i<imax)) {
+    depth++;
+    i++;
+  }
+  if (i==imax) {
+    fprintf(stderr,"Failure in burst_depth_for_max_dm.  Did not reach requested DM of %12.4g at a depth of %d\n",max_dm,i);
+    return 0;
+  }
+  
+  return depth;
+}
+
+
+//JLS 08 Aug 2014
+//since the silly way I have of mapping frequency channels into lambda^2 channels is a bit slow
+//but is also static, pre-calculate it and put the mapping into chan_map.
+//chan_map should be pre-allocated, with at least 2**depth elements
+
+// If chan_map is an array of indeces, should it not be typed `size_t *`? -KM
+void burst_setup_channel_mapping(CM_DTYPE *chan_map, size_t nfreq, float freq0,
+        float delta_f, int depth)
+{
+  int nchan=get_nchan_from_depth(depth);
+  int i,j;
+
+  float l0=1.0/(freq0+0.5*delta_f);
+  l0=l0*l0;
+  float l1=1.0/(freq0+(nfreq-0.5)*delta_f);
+  l1=l1*l1;
+  if (l0>l1) {
+    float tmp=l0;
+    l0=l1;
+    l1=tmp;
+  }
+
+  float *out_chans=(float *)malloc(sizeof(float)*nchan);
+  float dl=(l1-l0)/(nchan-1);
+  for (i=0;i<nchan;i++)
+    out_chans[i]=l0+dl*i;
+  
+  for (i=0;i<nfreq;i++) {
+    float myl=1.0/(freq0+(0.5+i)*delta_f);
+    myl=myl*myl;
+    int jmin=-1;
+    float minerr=1e30;
+    for (j=0;j<nchan;j++) {
+      float curerr=fabs(myl-out_chans[j]);
+      if (curerr<minerr) {
+        minerr=curerr;
+        jmin=j;
+      }
+    }
+    chan_map[i]=jmin;
+  }
+  
+  
+}
 
 /*--------------------------------------------------------------------------------*/
 void copy_in_data(Data *dat, float *indata, int ndata)

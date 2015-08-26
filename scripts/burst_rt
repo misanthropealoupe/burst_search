@@ -1,0 +1,79 @@
+#! /usr/bin/python
+
+import time
+import argparse
+from os import path
+import logging
+
+import numpy as np
+import h5py
+
+from burst_search import guppi
+from multiprocessing import Process
+from datasource import FileChimeSource
+import search
+
+# Command line arguments.
+parser = argparse.ArgumentParser(description='Search real-time feed or chime-like data file for transients')
+parser.add_argument(
+	"files",
+	metavar="input_dat_files",
+	type=str,
+	nargs='+',
+	help="input .dat files to chunk",
+	)
+parser.add_argument(
+	"--chunk_size",
+	type=int,
+	default=1024,
+	)
+parser.add_argument(
+	"--min_dm",
+	type=float,
+	default=50.0,
+	)
+parser.add_argument(
+	"--max_dm",
+	type=float,
+	default=1000.0,
+	)
+parser.add_argument(
+	"--snr_min",
+	type=float,
+	default=8.0,
+	)
+parser.add_argument(
+	"--cadence",
+	type=float,
+	default=0.001
+	)
+
+f0 = 400.0
+bw = 400.0
+
+def do_indef(ds, snr_min, min_dm,):
+	while(True):
+		dat = ds()
+		search.basic(dat, )
+
+
+if __name__ == "__main__":
+	args = parser.parse_args()
+	files = args.files
+	#chunk_size = args.chunk_size
+	min_dm = args.min_dm
+	max_dm = args.max_dm
+	snr_min = args.snr_min
+	cadence = args.cadence
+
+	for f in files:
+		ah = ActionHandler(modes='save_plot_dm, print')
+		#def __init__(self,chunk_size,buffer_size,delta_t, nfreq, freq0, delta_f, max_dm):
+		ds = FileChimeSource(chunk_size, f)
+		print "Using effective cadence: %f" % ds.set_num_packs(cadence)
+		frame_cadence = FileChimeSource.frame_cadence
+		npacks = ds.npacks
+		rb = RingBuffer(header.nframes,8*chunk_size, header., , )
+
+		rs = lambda: search.basic(ds.get_cadence_chunk(), snr_threshold = snr_min, min_dm = min_dm)
+
