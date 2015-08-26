@@ -189,7 +189,7 @@ class RingBuffer(object):
 
 		add_to_ring(
 			<DTYPE_t *> data.data,
-			<DTYPE_t *> out,
+			<DTYPE_t *> out.data,
 			<CM_DTYPE_t *> chan_map.data,
 			<DTYPE_t *> ring_buffer.data,
 			ringt0,
