@@ -12,10 +12,10 @@ ctypedef np.float32_t DTYPE_t
 CM_DTYPE = np.int64
 ctypedef np.int64_t CM_DTYPE_t
 
-ctypedef extern struct Peak;
+#ctypedef extern struct Peak;
 
 # C prototypes.
-cdef extern Peak* add_to_ring(DTYPE_t * indata, CM_DTYPE_t *chan_map,
+cdef extern float* add_to_ring(DTYPE_t * indata, CM_DTYPE_t *chan_map,
 		DTYPE_t *outdata, int ring_t0, int chunk_size, int ntime, float delta_t, size_t nfreq,
 		float freq0, float delta_f, int depth)
 
@@ -182,7 +182,7 @@ class RingBuffer(object):
 			np.ndarray[ndim=1, dtype=CM_DTYPE_t] chan_map
 			np.ndarray[ndim=2, dtype=DTYPE_t] out
 			np.ndarray[ndim=2, dtype=DTYPE_t] ring_buffer
-			
+
 		chan_map = self._chan_map
 		out = np.empty(shape=(ndm, self._chunk_length), dtype=DTYPE)
 		ring_buffer = self._ring_buffer
