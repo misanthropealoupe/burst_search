@@ -206,7 +206,7 @@ class RingBuffer(object):
 		self._ringt0 = ringt0
 
 		dm_data = np.ascontiguousarray(out[:,:ntime])
-		spec_data = np.ascontiguousarray(data1[:, :ntime])
+		spec_data = np.ascontiguousarray(data[:, :ntime])
 
 		dm0 = 0
 		delta_dm = (delta_t / 4150.
