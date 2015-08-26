@@ -15,7 +15,7 @@ ctypedef np.int64_t CM_DTYPE_t
 #ctypedef extern struct Peak;
 
 # C prototypes.
-cdef extern float* add_to_ring(DTYPE_t * indata, CM_DTYPE_t *chan_map,
+cdef extern void add_to_ring(DTYPE_t * indata, CM_DTYPE_t *chan_map,
 		DTYPE_t *outdata, int ring_t0, int chunk_size, int ntime, float delta_t, size_t nfreq,
 		float freq0, float delta_f, int depth)
 
