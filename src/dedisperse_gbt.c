@@ -1418,6 +1418,41 @@ Peak find_peaks_wnoise_onedm(float *vec, int nsamples, int max_depth, int cur_de
 }
 
 /*--------------------------------------------------------------------------------*/
+Peak find_peak_triangle(Data *dat)
+{
+  //find the longest segment to be searched for
+  //can't have a 5-sigma event w/out at least 25 samples to search over
+  int max_len=dat->ndata/20;
+  int max_seg=max_len/7;
+  int max_depth=log2(max_seg);
+  //printf("max_depth is %d from %d\n",max_depth,dat->ndata);
+  Peak best;
+  best.snr=0;
+  if (max_depth<1)
+    return;
+#pragma omp parallel
+  {
+    Peak mybest;
+    mybest.snr=0;
+#pragma omp for
+    for (int i=0;i<dat->nchan;i++) {
+      //This is the only difference,
+      //Definitely not code-efficient
+      Peak dm_best=find_peaks_wnoise_onedm(dat->data[i],dat->ndata - dat->nchan - i,max_depth,0);
+      if (dm_best.snr>mybest.snr) {
+  mybest=dm_best;
+  mybest.dm_channel=i;
+      }
+    }
+#pragma omp critical
+    {
+      if (mybest.snr>best.snr)
+  best=mybest;
+    }
+  }
+  return best;
+}
+/*--------------------------------------------------------------------------------*/
 Peak find_peak(Data *dat)
 {
   //find the longest segment to be searched for
@@ -1461,11 +1496,9 @@ size_t find_peak_wrapper_triangle(float *data, int nchan, int ndata, float *peak
   for (int i=0;i<nchan;i++)
     mat[i]=data+i*ndata;
   dat.data=mat;
-  //this is the only difference between the other method
-  //definitely cleaner to pass as a parameter
-  dat.ndata=ndata - i;
+  dat.ndata=ndata;
   dat.nchan=nchan;
-  Peak best=find_peak(&dat);
+  Peak best=find_peak_triangle(&dat);
   free(dat.data); //get rid of the pointer array
   *peak_snr=best.snr;
   *peak_channel=best.dm_channel;
