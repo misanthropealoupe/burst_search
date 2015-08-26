@@ -1,3 +1,4 @@
+from multiprocessing import Queue
 
 def _get_trigger_action(self,action):
 	if action == 'print':
@@ -34,7 +35,16 @@ def _get_trigger_action(self,action):
 
 
 class ActionHandler(object):
-	def __init__(self, modes):
+	def __init__(self, modes, nhandle=5):
 		self._actions = [get_trigger_action(s.strip()) for s in modes.split(',')]
+		self._aq = Queue()
+		self._nhandle = nhandle
 
-	def __call__(triggers):
+	def put(triggers,data):
+		self._aq.put((triggers, data))
+
+	def __call__(triggers, data):
+		for i in xrange(0,nhandle):
+			triggers, data = self._aq.get()
+			a in self._actions:
+				a(triggers, data)

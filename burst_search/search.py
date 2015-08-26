@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 
 import _search
 
-
-
 class Trigger(object):
 
     def __init__(self, data, centre, snr=0.,spec_ind=None):
@@ -58,8 +56,6 @@ class Trigger(object):
         plt.xlabel("time (s)")
         plt.ylabel("DM (Pc/cm^3)")
         plt.colorbar()
-
-
 
 def basic(data, snr_threshold=5., min_dm=50.,spec_ind=None):
     """Simple event search of DM data.

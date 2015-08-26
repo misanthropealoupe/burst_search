@@ -26,6 +26,7 @@ typedef struct {
   float noise;
   int dm_channel;
   int duration;
+  long global_ind;
 } Peak;
 
 /*--------------------------------------------------------------------------------*/

@@ -1,6 +1,5 @@
 from multiprocessing import Queue
 import numpy as np
-#from . import arutil
 
 class DataSource(object):
 	def __init__(self, chunk_size, active = True):
@@ -16,10 +15,15 @@ class RtChimeSource(DataSource):
 		DataSource(chunk_size)
 
 class FileChimeSource(DataSource):
-	def __init__(self, chunk_size, dat_path):
+	frame_cadence = 2.56e-6
+	def __init__(self, desired_cadence, dat_path):
 		DataSource(chunk_size)
 		self._datfile = open(dat_path,'r')
-		self.header = self.get_header() #convenience
+		self.set_num_packs(desired_cadence)
+		#convenience
+		self.header = self.get_header()
+		self.nframes = self.header['nframe']
+		self.nfreq = self.header['nfreq']
 		self.pk_dtype = mk_packet_dtype(self.header['nframe'], self.header['nfreq'], self.header['ninput'])
 		self.header_dtype = mk_packet_dtype(0,0,0)
 		self.tframes = 0
@@ -32,7 +36,26 @@ class FileChimeSource(DataSource):
 		return np.fromstring(head_buf, dtype=header_dtype, count=1)[0]
 
 	def pull_chunk(self):
-		npk = self._chunk_size
+		self.queue.put(self.get_chunk())
+
+	#get a block with a specific length time axis (in 'effective cadence' units)
+	def get_intensity_cadence_block(self, num_t):
+		npackets = num_t*self.npacks
+		nframes = self.nframes
+		sumsqr = np.zeros((self.nfreq, num_t),dtype=np.float32)
+		for i in xrange(0,num_t):
+			raw = get_chunk()['data']
+			sumsqr[:,i] = np.sum(np.sum(np.sum(np.square(raw),axis=0),axis=0),axis=1)
+		return sumsqr
+
+	def set_num_packs(desired_cadence):
+		self.npacks = int(round(desired_cadence/frame_cadence))/self.nframes
+		self._chunk_size = self.npacks
+		self.eff_cadence = self.npacks*self.nframes*frame_cadence
+		return self.eff_cadence
+
+
+	def get_chunk(self, npk=self_chunk_size):
 		pksize = self.pk_dtype.itemsize
 		read_size = pksize * npk
 		buf = self._datfile.read(read_size)
@@ -48,12 +71,10 @@ class FileChimeSource(DataSource):
 
 		if np.logical_and(valid != 0xffffffff, valid != 0).any():
             		#print "Corrupt data, or got confused about offset."
-            		return
-
+            		return None
+            	return npb
             	#Do not check for lost packets
             	#if (valid == 0).any():
-
-		self.queue.put(npb)
 
 	def __call__(self):
 		self.pull_chunk()

@@ -1,5 +1,6 @@
+import search
 class Searcher(object):
-
+	pass
 class RtSearch(Searcher):
 	def __init__(self, data_source, ring_buffer, action_hander):
 		self._data_source = data_source
@@ -8,6 +9,7 @@ class RtSearch(Searcher):
 
 	def __call__(self):
 		p = self._data_source.queue.get()
-		triggers = ring_buffer(p)
+		rb_data = ring_buffer(p)
+		triggers = search.basic(rb_data)
 		del p
 		return triggers

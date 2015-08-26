@@ -37,6 +37,18 @@ ext_dedisperse = Extension(
     define_macros=MACROS,
     )
 
+ext_ring = Extension(
+    "burst_search.ring_buffer",
+    ["burst_search/ring_buffer.pyx", "src/ring_buffer.c",
+        "src/dedisperse_gbt.c"],
+    include_dirs=INCLUDE_DIRS + [np.get_include(), "src/"],
+    library_dirs = LIBRARY_DIRS,
+    depends=["src/dedisperse.h", "dedisperse_gbt.h"],
+    extra_compile_args=COMPILE_FLAGS,
+    extra_link_args=LINK_FLAGS,
+    define_macros=MACROS,
+    )
+
 ext_search = Extension(
     "burst_search._search",
     ["burst_search/_search.pyx", "src/dedisperse_gbt.c"],
@@ -60,7 +72,7 @@ ext_preprocess = Extension(
     )
 
 
-EXTENSIONS = [ext_dedisperse, ext_search, ext_preprocess]
+EXTENSIONS = [ext_dedisperse, ext_search, ext_preprocess, ext_ring]
 
 
 SCRIPTS = ["scripts/burst_guppi", "scripts/burst_watch_guppi", "scripts/burst_bench"]
