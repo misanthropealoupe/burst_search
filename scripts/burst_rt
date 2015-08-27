@@ -36,26 +36,43 @@ parser.add_argument(
 parser.add_argument(
 	"--max_dm",
 	type=float,
-	default=1000.0,
+	default=500.0,
 	)
 parser.add_argument(
 	"--snr_min",
 	type=float,
-	default=8.0,
+	default=6.0,
 	)
 parser.add_argument(
 	"--cadence",
 	type=float,
 	default=0.001
 	)
+parser.add_argument(
+	"--ring_length",
+	type=int,
+	default=16*1024
+	)
+#Cadence sample units
+parser.add_argument(
+	"--chunk_length",
+	type=int,
+	default=1024
+	)
+parser.add_argument(
+	"--bw",
+	type=float,
+	default=-400.0
+	)
 
-f0 = 400.0
-bw = 400.0
+#def do_indef(ds, snr_min, min_dm,):
+#	while(True):
+#		dat = ds()
+#		search.basic(dat, )
 
-def do_indef(ds, snr_min, min_dm,):
-	while(True):
-		dat = ds()
-		search.basic(dat, )
+def do_forever(ds,f):
+	while ds.active:
+		f()
 
 
 if __name__ == "__main__":
@@ -66,6 +83,9 @@ if __name__ == "__main__":
 	max_dm = args.max_dm
 	snr_min = args.snr_min
 	cadence = args.cadence
+	ring_length = args.ring_length
+	chunk_length = args.chunk_length
+	bw = arg.bw
 
 	for f in files:
 		ah = ActionHandler(modes='save_plot_dm, print')
@@ -74,7 +94,10 @@ if __name__ == "__main__":
 		print "Using effective cadence: %f" % ds.set_num_packs(cadence)
 		frame_cadence = FileChimeSource.frame_cadence
 		npacks = ds.npacks
-		rb = RingBuffer(header.nframes,8*chunk_size, header., , )
+		rb = RingBuffer(chunk_length, ring_length, ds.eff_cadence,ds.nfreq, ds.freq0, bw/float(ds.nfreq),max_dm)
 
-		rs = lambda: search.basic(ds.get_cadence_chunk(), snr_threshold = snr_min, min_dm = min_dm)
+		rs = lambda: search.basic_triangle(ds.get_intensity_cadence_block(chunk_length), snr_threshold = snr_min, min_dm = min_dm)
+		f = lambda: do_forever(ds,rs)
+
+		p = Process(target=f)
 

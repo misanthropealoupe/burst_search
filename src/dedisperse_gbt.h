@@ -1,3 +1,5 @@
+#ifndef DEDISPERSE_GBT_H__
+#define DEDISPERSE_GBT_H__
 
 typedef struct {
   //float dm_max;
@@ -46,3 +48,4 @@ void clean_rows_2pass(float *vec, size_t nchan, size_t ndata);
 void setup_data(Data *dat);
 void remove_noisecal(Data *dat, int period,int apply_calib);
 Data *read_gbt(const char *fname);
+#endif

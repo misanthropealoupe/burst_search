@@ -82,7 +82,7 @@ def basic(data, snr_threshold=5., min_dm=50.,spec_ind=None):
 
     return triggers
 
-def basic_desc_triangle(data, snr_threshold=5., min_dm=50.,spec_ind=None):
+def basic_triangle(data, snr_threshold=5., min_dm=50.,spec_ind=None):
     """Simple event search of partial (ring buffered) DM data.
 
     Returns

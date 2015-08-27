@@ -25,10 +25,6 @@ cdef extern int burst_get_num_dispersions(size_t nfreq, float freq0,
 cdef extern int burst_depth_for_max_dm(float max_dm, float delta_t,
 		size_t nfreq, float freq0, float delta_f)
 
-cdef extern int  burst_dm_transform(DTYPE_t *indata1, DTYPE_t *indata2,
-		CM_DTYPE_t *chan_map, DTYPE_t *outdata, size_t ntime1, int ntime2,
-		float delta_t, size_t nfreq, float freq0, float delta_f, int depth,int jon)
-
 cdef extern void burst_setup_channel_mapping(CM_DTYPE_t *chan_map, size_t nfreq,
 		float freq0, float delta_f, int depth)
 
@@ -124,7 +120,7 @@ class RingBuffer(object):
 	def depth(self):
 		return self._depth
 
-	def __init__(self,chunk_size,buffer_size,delta_t, nfreq, freq0, delta_f, max_dm):
+	def __init__(self, chunk_length, buffer_length, delta_t, nfreq, freq0, delta_f, max_dm):
 
 		cdef:
 			float cdelta_t = delta_t

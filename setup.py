@@ -39,8 +39,7 @@ ext_dedisperse = Extension(
 
 ext_ring = Extension(
     "burst_search.ring_buffer",
-    ["burst_search/ringbuffer.pyx", "src/ring_buffer.c",
-        "src/dedisperse_gbt.c"],
+    ["burst_search/ringbuffer.pyx", "src/ring_buffer.c"],
     include_dirs=INCLUDE_DIRS + [np.get_include(), "src/"],
     library_dirs = LIBRARY_DIRS,
     depends=["src/dedisperse.h", "dedisperse_gbt.h"],
@@ -51,7 +50,7 @@ ext_ring = Extension(
 
 ext_search = Extension(
     "burst_search._search",
-    ["burst_search/_search.pyx", "src/dedisperse_gbt.c"],
+    ["burst_search/_search.pyx", "src/ring_buffer.c"],
     include_dirs=INCLUDE_DIRS + [np.get_include(), "src/"],
     library_dirs = LIBRARY_DIRS,
     depends=["dedisperse_gbt.h"],
@@ -62,7 +61,7 @@ ext_search = Extension(
 
 ext_preprocess = Extension(
     "burst_search._preprocess",
-    ["burst_search/_preprocess.pyx", "src/dedisperse_gbt.c"],
+    ["burst_search/_preprocess.pyx", "src/ring_buffer.c"],
     include_dirs=INCLUDE_DIRS + [np.get_include(), "src/"],
     library_dirs = LIBRARY_DIRS,
     depends=["dedisperse_gbt.h"],
@@ -72,8 +71,8 @@ ext_preprocess = Extension(
     )
 
 
+#EXTENSIONS = [ext_dedisperse, ext_search, ext_preprocess, ext_ring]
 EXTENSIONS = [ext_dedisperse, ext_search, ext_preprocess, ext_ring]
-
 
 SCRIPTS = ["scripts/burst_guppi", "scripts/burst_watch_guppi", "scripts/burst_bench"]
 
@@ -88,7 +87,7 @@ setup(
     install_requires = ['numpy', 'pyfits', 'Cython'],
 
     # metadata for upload to PyPI
-    author = "Kiyoshi Wesley Masui, Jonathan Sievers",
+    author = "Kiyoshi Wesley Masui, Jonathan Sievers, Alexander Roman",
     author_email = "kiyo@physics.ubc.ca",
     description = "Fast radio burst search software.",
     license = "GPL v2.0",

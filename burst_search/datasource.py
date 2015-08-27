@@ -23,7 +23,7 @@ class FileChimeSource(DataSource):
 		cdata = cdata.reshape((-1,) + cdata.shape[2:])
 		return cdata
 
-	def __init__(self, desired_cadence, dat_path):
+	def __init__(self, desired_cadence, dat_path,freq0=800.0):
 		DataSource(chunk_size)
 		self._datfile = open(dat_path,'r')
 		self.set_num_packs(desired_cadence)
@@ -31,6 +31,7 @@ class FileChimeSource(DataSource):
 		self.header = self.get_header()
 		self.nframes = self.header['nframe']
 		self.nfreq = self.header['nfreq']
+		self.freq0 = freq0
 		self.pk_dtype = mk_packet_dtype(self.header['nframe'], self.header['nfreq'], self.header['ninput'])
 		self.header_dtype = mk_packet_dtype(0,0,0)
 		self.tframes = 0

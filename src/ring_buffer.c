@@ -5,7 +5,7 @@
 #include <math.h>
 #include <assert.h>
 #include <omp.h>
-#include "dedisperse_gbt.h"
+#include "ring_buffer.h"
 
 #ifndef max
   #define max( a, b ) ( ((a) > (b)) ? (a) : (b) )
@@ -21,7 +21,26 @@
 #define THREAD 8
 #define OMP_THREADS 8
 
-//extern typedef struct Peak;
+float **matrix(long n, long m)
+{
+
+  float *vec=(float *)malloc(n*m*sizeof(float));
+  float **mat=(float **)malloc(n*sizeof(float *));
+  mat[0] = vec;
+  for (long i=1;i<n;i++) 
+    mat[i]=mat[i -1] + m;
+  return mat;
+}
+
+int get_npass(int n)
+{
+  int nn=0;
+  while (n>1) {
+    nn++;
+    n/=2;
+  }
+  return nn;
+}
 
 // For allocating output buffer.
 size_t burst_get_num_dispersions(size_t nfreq, float freq0,
@@ -96,20 +115,17 @@ void burst_setup_channel_mapping(CM_DTYPE *chan_map, size_t nfreq, float freq0,
 /*--------------------------------------------------------------------------------*/
 void copy_in_data(Data *dat, float *indata, int ndata)
 {
-  int npad=dat->ndata-ndata1;
   memset(dat->raw_data[0],0,dat->raw_nchan*dat->ndata*sizeof(float));
   //printf("npad is %d\n",npad);
-  assert(ndata2>=npad);
   
   for (int i=0;i<dat->raw_nchan;i++) {
-    for (int j=0;j<ndata1;j++) {
-
+    for (int j=0;j<ndata;j++) {
       //this line changes depending on memory ordering of input data
       //dat->raw_data[i*dat->ndata+j]=indata1[i*ndata1+j];      
 #ifdef BURST_DM_NOTRANSPOSE
-      dat->raw_data[i][j]=indata1[i*ndata1+j];      
+      dat->raw_data[i][j]=indata[i*ndata+j];      
 #else
-      dat->raw_data[i][j]=indata1[j*dat->raw_nchan+i];
+      dat->raw_data[i][j]=indata[j*dat->raw_nchan+i];
 #endif
     }
   }
@@ -127,7 +143,7 @@ Data *put_data_into_burst_struct(float *indata, size_t ntime, size_t nfreq, size
   dat->raw_data=matrix(dat->raw_nchan,dat->ndata);
   dat->chan_map=chan_map;
   dat->data=matrix(dat->nchan,dat->ndata);
-  copy_in_data(dat,indata,ntime,indata2,ntime2);
+  copy_in_data(dat,indata,ntime);
   
   return dat;
 }
@@ -155,33 +171,38 @@ void make_triangular_mat(float** mat, float* data, int rows, int offset, int del
 	}
 }
 
-/* returns data starting at a ringt0 - chunk_size after one call
-*   Note that ringt0 corresponds to the value of ringt0 after the call
-*   to update_ring_buffer.
-*/
-void add_to_ring(float* indata, float* outdata, int* chan_map, float* ring_buffer_data,
-	int ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth){
+/*
+ * in[j,i] contains the j-th timestream evaluated at time 
+ *    t = i - (j+1)s
+ * where i=0,...,m-1    j=0,...,n-1    and s is an integer lag
+ *
+ * The first half of the output array has (length,lag) given by
+ *    (m_out, s_out) = (m+s, 2s)
+ * and the second half has
+ *    (m_out, s_out) = (m+s+1, 2s+1)
+ */
+void dedisperse_kernel_lagged(float **in, float **out, int n, int m, int s)
+{
+    // I just haven't thought about the n=odd case
+    assert(n % 2 == 0);
 
-	Data *dat=put_data_into_burst_struct(indata,chunk_size,nfreq,chan_map,depth);
-	remap_data(dat);
-	float** ring_buffer = malloc(sizeof(float*)*dat->nchan);
-	make_rect_mat(ring_buffer,ring_buffer_data,dat->nchan,ring_length);
+    int npair = n/2;
+    for (int jj = 0; jj < npair; jj++) {
+	for (int i = 0; i < s; i++)
+	    out[jj][i] = in[2*jj+1][i];
+	for (int i = s; i < m; i++)
+	    out[jj][i] = in[2*jj][i-s] + in[2*jj+1][i];
+	for (int i = m; i < m+s; i++)
+	    out[jj][i] = in[2*jj][i-s];
 
-	//allocate the triangular matrix for output
-	nfreq = nchan;
-	float* tmp = malloc((nfreq*chunk_size + (nfreq*(nfreq - 1))/2)*sizeof(float));
-	float** tmp_mat = malloc(nchan*sizeof(float*));
-	make_triangular_mat(tmp_mat,tmp,chunk_size,1);
-	dedisperse_lagged(dat->data,tmp,nchan,chunk_size);
-	update_ring_buffer(tmp,ring_buffer,dat->nchan,chunk_size,ring_length,&ringt0);
-	
-	float ** out_mat = malloc(sizeof(float*)*dat->nchan);
-	make_rect_mat(out_mat,outdata,dat->nchan,chunk_size);
-	for(int i = 0; i < dat->nchan; i++)
-		memcpy(out_mat[i],ring_buffer[i] + (ringt0 - chunk_length),(ringt0 - i));
-	free(tmp);
+	for (int i = 0; i < s+1; i++)
+	    out[jj+npair][i] = in[2*jj+1][i];
+	for (int i = s+1; i < m; i++)
+	    out[jj+npair][i] = in[2*jj][i-s-1] + in[2*jj+1][i];
+	for (int i = m; i < m+s+1; i++)
+	    out[jj+npair][i] = in[2*jj][i-s-1];
+    }
 }
-
 
 /*
  * Incremental dedispersion is implemented as two steps:
@@ -301,5 +322,351 @@ void update_ring_buffer(float **chunk, float **ring_buffer, int nchan, int nchun
 
     *ring_t0 = (t0 + nchunk) % nring;
 }
+/*--------------------------------------------------------------------------------*/
+
+/* returns data starting at a ringt0 - chunk_size after one call
+*   Note that ringt0 corresponds to the value of ringt0 after the call
+*   to update_ring_buffer.
+*/
+void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_buffer_data, int ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth)
+{
+
+	Data *dat=put_data_into_burst_struct(indata,chunk_size,nfreq,chan_map,depth);
+	remap_data(dat);
+	float** ring_buffer = malloc(sizeof(float*)*dat->nchan);
+	make_rect_mat(ring_buffer,ring_buffer_data,dat->nchan,ring_length);
+
+	//allocate the triangular matrix for output
+	int nchan = dat->nchan;
+	float* tmp = malloc((nfreq*chunk_size + (nfreq*(nfreq - 1))/2)*sizeof(float));
+	float** tmp_mat = malloc(nchan*sizeof(float*));
+	make_triangular_mat(tmp_mat,tmp,nchan,chunk_size,1);
+	dedisperse_lagged(dat->data,tmp,nchan,chunk_size);
+	update_ring_buffer(tmp,ring_buffer,dat->nchan,chunk_size,ring_length,&ringt0);
+	
+	float ** out_mat = malloc(sizeof(float*)*dat->nchan);
+	make_rect_mat(out_mat,outdata,dat->nchan,chunk_size);
+	for(int i = 0; i < dat->nchan; i++)
+		memcpy(out_mat[i],ring_buffer[i] + (ringt0 - chunk_size),(ringt0 - i));
+	free(tmp);
+}
 
 /*--------------------------------------------------------------------------------*/
+
+void find_4567_peaks_wnoise(float *vec, int nsamp, Peak *peak4, Peak *peak5, Peak *peak6, Peak *peak7)
+{
+  float s4=0,s5=0,s6=0,s7=0;
+  float v4=0,v5=0,v6=0,v7=0;
+  peak4->ind=0;
+  peak5->ind=0;
+  peak6->ind=0;
+  peak7->ind=0;
+  peak4->duration=4;
+  peak5->duration=5;
+  peak6->duration=6;
+  peak7->duration=7;
+
+  float cur4=vec[2]+vec[3]+vec[4]+vec[5];
+  peak4->peak=cur4;
+  peak5->peak=cur4+vec[6];
+  float cur6=vec[0]+vec[1]+cur4;
+  peak6->peak=cur6;
+  peak7->peak=cur6+vec[6];
+  for (int i=6;i<nsamp;i++) {
+    cur4=cur4+vec[i];
+    s5+=cur4;
+    v5+=cur4*cur4;
+    if (cur4>peak5->peak) {
+      peak5->peak=cur4;
+      peak5->ind=i;
+    }
+
+    cur4=cur4-vec[i-4];
+    s4+=cur4;
+    v4+=cur4*cur4;
+    if (cur4>peak4->peak) {
+      peak4->peak=cur4;
+      peak4->ind=i;
+    }
+
+    cur6=cur6+vec[i];
+    s7+=cur6;
+    v7+=cur6*cur6;
+    if (cur6>peak7->peak) {
+      peak7->peak=cur6;
+      peak7->ind=i;
+    }
+
+    cur6=cur6-vec[i-6];
+    s6+=cur6;
+    v6+=cur6*cur6;
+    if (cur6>peak6->peak) {
+      peak6->peak=cur6;
+      peak6->ind=i;
+    }
+
+  }
+  float n4,n5,n6,n7;
+  s4/=(nsamp-7);
+  s5/=(nsamp-7);
+  s6/=(nsamp-7);
+  s7/=(nsamp-7);
+  v4/=(nsamp-7);
+  v5/=(nsamp-7);
+  v6/=(nsamp-7);
+  v7/=(nsamp-7);
+
+  n4=sqrt(v4-s4*s4);
+  n5=sqrt(v5-s5*s5);
+  n6=sqrt(v6-s6*s6);
+  n7=sqrt(v7-s7*s7);
+
+  peak4->snr=(peak4->peak-s4)/n4;
+  peak5->snr=(peak5->peak-s5)/n5;
+  peak6->snr=(peak6->peak-s6)/n6;
+  peak7->snr=(peak7->peak-s7)/n7;
+
+  peak4->noise=n4;
+  peak5->noise=n5;
+  peak6->noise=n6;
+  peak7->noise=n7;
+}
+
+/*--------------------------------------------------------------------------------*/
+
+
+Peak find_peaks_wnoise_onedm(float *vec, int nsamples, int max_depth, int cur_depth)
+{
+
+  int wt=1<<cur_depth;
+
+
+
+  Peak best;  
+  best.snr=0;
+  best.peak=0;
+  //do the 1/2/3 sample case on the first pass through
+  if (cur_depth==0) {
+    float best1=0;
+    float best2=0;
+    float best3=0;
+    float s1=0,s2=0,s3=0;
+    float v1=0,v2=0,v3=0;
+    int i1=0,i2=0,i3=0;
+    float tmp=vec[0]+vec[1];
+    best1=vec[0];
+    if (vec[1]>best1)
+      best1=vec[1];
+    for (int i=2;i<nsamples;i++) {
+      if (vec[i]>best1) {
+	best1=vec[i];
+	i1=i;
+      }
+      s1+=vec[i];
+      v1+=vec[i]*vec[i];
+      tmp+=vec[i];
+      if (tmp>best3) {
+	best3=tmp;
+	i3=i;
+      }
+      s3+=tmp;
+      v3+=tmp*tmp;
+      tmp-=vec[i-2];
+      if (tmp>best2) {
+	best2=tmp;
+	i2=i;
+      }
+      s2+=tmp;
+      v2+=tmp*tmp;
+    }
+    s1/=nsamples-2;
+    s2/=nsamples-2;
+    s3/=nsamples-2;
+    v1/=nsamples-2;
+    v2/=nsamples-2;
+    v3/=nsamples-2;
+    v1=sqrt(v1-s1*s1);
+    v2=sqrt(v2-s2*s2);
+    v3=sqrt(v3-s3*s3);
+    float snr1=(best1-s1)/v1;
+    float snr2=(best2-s2)/v2;
+    float snr3=(best3-s3)/v3;
+    if (snr1>best.snr) {
+      best.snr=snr1;
+      best.peak=best1;
+      best.ind=i1;
+      best.depth=0;
+      best.noise=v1;
+      best.duration=1;
+    }
+    if (snr2>best.snr) {
+      best.snr=snr2;
+      best.peak=best2;
+      best.ind=i2;
+      best.depth=0;
+      best.noise=v2;
+      best.duration=2;
+    }
+    if (snr3>best.snr) {
+      best.snr=snr3;
+      best.peak=best3;
+      best.ind=i3;
+      best.depth=0;
+      best.noise=v3;
+      best.duration=3;
+    }
+    
+    
+    
+  }
+  
+  
+  
+  Peak peak4,peak5,peak6,peak7;
+  find_4567_peaks_wnoise(vec,nsamples,&peak4,&peak5,&peak6,&peak7);
+  
+  //peak4=peak4/sqrt(4*wt);                                                                                                               
+  //peak5=peak5/sqrt(5*wt);                                                                                                               
+  //peak6=peak6/sqrt(6*wt);                                                                                                               
+  //peak7=peak7/sqrt(7*wt);                                                                                                               
+
+
+
+
+
+  if (peak4.snr>best.snr)
+    best=peak4;
+  if (peak5.snr>best.snr)
+    best=peak5;
+  if (peak6.snr>best.snr)
+    best=peak6;
+  if (peak7.snr>best.snr)
+    best=peak7;
+  best.depth=cur_depth;
+  //printf("peaks are %12.5g %12.5g %12.5g %12.5g\n",peak4,peak5,peak6,peak7);                                                            
+
+  if (cur_depth<max_depth) {
+    int nn=nsamples/2;
+    float *vv=(float *)malloc(sizeof(float)*nn);
+    for (int i=0;i<nn;i++)
+      vv[i]=vec[2*i]+vec[2*i+1];
+    Peak new_best=find_peaks_wnoise_onedm(vv,nn,max_depth,cur_depth+1);
+    free(vv);
+    if (new_best.snr>best.snr)
+      best=new_best;
+  }
+  
+  return best;
+}
+
+/*--------------------------------------------------------------------------------*/
+Peak find_peak_triangle(Data *dat)
+{
+  //find the longest segment to be searched for
+  //can't have a 5-sigma event w/out at least 25 samples to search over
+  int max_len=dat->ndata/20;
+  int max_seg=max_len/7;
+  int max_depth=log2(max_seg);
+  //printf("max_depth is %d from %d\n",max_depth,dat->ndata);
+  Peak best;
+  best.snr=0;
+  if (max_depth<1)
+    return;
+#pragma omp parallel
+  {
+    Peak mybest;
+    mybest.snr=0;
+#pragma omp for
+    for (int i=0;i<dat->nchan;i++) {
+      //This is the only difference,
+      //Definitely not code-efficient
+      Peak dm_best=find_peaks_wnoise_onedm(dat->data[i],dat->ndata - dat->nchan - i,max_depth,0);
+      if (dm_best.snr>mybest.snr) {
+  mybest=dm_best;
+  mybest.dm_channel=i;
+      }
+    }
+#pragma omp critical
+    {
+      if (mybest.snr>best.snr)
+  best=mybest;
+    }
+  }
+  return best;
+}
+/*--------------------------------------------------------------------------------*/
+Peak find_peak(Data *dat)
+{
+  //find the longest segment to be searched for
+  //can't have a 5-sigma event w/out at least 25 samples to search over
+  int max_len=dat->ndata/20;
+  int max_seg=max_len/7;
+  int max_depth=log2(max_seg);
+  //printf("max_depth is %d from %d\n",max_depth,dat->ndata);
+  Peak best;
+  best.snr=0;
+  if (max_depth<1)
+    return;
+#pragma omp parallel
+  {
+    Peak mybest;
+    mybest.snr=0;
+#pragma omp for
+    for (int i=0;i<dat->nchan;i++) {
+      Peak dm_best=find_peaks_wnoise_onedm(dat->data[i],dat->ndata-dat->nchan,max_depth,0);
+      if (dm_best.snr>mybest.snr) {
+	mybest=dm_best;
+	mybest.dm_channel=i;
+      }
+    }
+#pragma omp critical
+    {
+      if (mybest.snr>best.snr)
+	best=mybest;
+    }
+  }
+  return best;
+}
+/*--------------------------------------------------------------------------------*/
+//Assumes descending triangular format
+size_t find_peak_wrapper_triangle(float *data, int nchan, int ndata, float *peak_snr, int *peak_channel, int *peak_sample, int *peak_duration)
+{
+  Data dat;
+  float **mat=(float **)malloc(sizeof(float *)*nchan);
+  //Assumes a rectangular matrix with a triangular
+  //zero fill
+  for (int i=0;i<nchan;i++)
+    mat[i]=data+i*ndata;
+  dat.data=mat;
+  dat.ndata=ndata;
+  dat.nchan=nchan;
+  Peak best=find_peak_triangle(&dat);
+  free(dat.data); //get rid of the pointer array
+  *peak_snr=best.snr;
+  *peak_channel=best.dm_channel;
+  //starting sample of the burst
+  *peak_sample=best.ind*(1<<best.depth);
+  *peak_duration=best.duration*(1<<best.depth);
+  return 0;
+
+}
+/*--------------------------------------------------------------------------------*/
+size_t find_peak_wrapper(float *data, int nchan, int ndata, float *peak_snr, int *peak_channel, int *peak_sample, int *peak_duration)
+{
+  Data dat;
+  float **mat=(float **)malloc(sizeof(float *)*nchan);
+  for (int i=0;i<nchan;i++)
+    mat[i]=data+i*ndata;
+  dat.data=mat;
+  dat.ndata=ndata;
+  dat.nchan=nchan;
+  Peak best=find_peak(&dat);
+  free(dat.data); //get rid of the pointer array
+  *peak_snr=best.snr;
+  *peak_channel=best.dm_channel;
+  //starting sample of the burst
+  *peak_sample=best.ind*(1<<best.depth);
+  *peak_duration=best.duration*(1<<best.depth);
+  return 0;
+  
+}
