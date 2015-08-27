@@ -38,7 +38,7 @@ ext_dedisperse = Extension(
     )
 
 ext_ring = Extension(
-    "burst_search.ring_buffer",
+    "burst_search.ringbuffer",
     ["burst_search/ringbuffer.pyx", "src/ring_buffer.c"],
     include_dirs=INCLUDE_DIRS + [np.get_include(), "src/"],
     library_dirs = LIBRARY_DIRS,
