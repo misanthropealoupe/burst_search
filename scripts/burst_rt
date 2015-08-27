@@ -10,9 +10,11 @@ import h5py
 
 from burst_search import guppi
 from multiprocessing import Process
-from datasource import FileChimeSource
-from ringbuffer import RingBuffer
-import search
+from burst_search import datasource
+from burst_search.datasource import FileChimeSource
+from burst_search.ringbuffer import RingBuffer
+from burst_search.actionhandler import ActionHandler
+import burst_search.search as search
 
 # Command line arguments.
 parser = argparse.ArgumentParser(description='Search real-time feed or chime-like data file for transients')
@@ -70,10 +72,10 @@ parser.add_argument(
 #		dat = ds()
 #		search.basic(dat, )
 
-def do_forever(ds,f):
-	while ds.active:
+def do_forever(source,f):
+	while True:
+		print "loop"
 		f()
-
 
 if __name__ == "__main__":
 	args = parser.parse_args()
@@ -85,19 +87,22 @@ if __name__ == "__main__":
 	cadence = args.cadence
 	ring_length = args.ring_length
 	chunk_length = args.chunk_length
-	bw = arg.bw
+	bw = args.bw
 
 	for f in files:
 		ah = ActionHandler(modes='save_plot_dm, print')
 		#def __init__(self,chunk_size,buffer_size,delta_t, nfreq, freq0, delta_f, max_dm):
-		ds = FileChimeSource(chunk_size, f)
+		ds = FileChimeSource(chunk_length, f)
 		print "Using effective cadence: %f" % ds.set_num_packs(cadence)
-		frame_cadence = FileChimeSource.frame_cadence
+		frame_cadence = datasource.frame_cadence
 		npacks = ds.npacks
 		rb = RingBuffer(chunk_length, ring_length, ds.eff_cadence,ds.nfreq, ds.freq0, bw/float(ds.nfreq),max_dm)
 
-		rs = lambda: search.basic_triangle(ds.get_intensity_cadence_block(chunk_length), snr_threshold = snr_min, min_dm = min_dm)
+		rs = lambda: search.basic_triangle(rb(ds.get_intensity_cadence_block(chunk_length)), snr_threshold = snr_min, min_dm = min_dm)
 		f = lambda: do_forever(ds,rs)
 
 		p = Process(target=f)
+		p.start()
+		p.join()
+		#p.jo
 
