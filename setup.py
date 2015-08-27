@@ -72,9 +72,9 @@ ext_preprocess = Extension(
 
 
 #EXTENSIONS = [ext_dedisperse, ext_search, ext_preprocess, ext_ring]
-EXTENSIONS = [ext_dedisperse, ext_search, ext_preprocess, ext_ring]
+EXTENSIONS = [ext_search, ext_preprocess, ext_ring]
 
-SCRIPTS = ["scripts/burst_guppi", "scripts/burst_watch_guppi", "scripts/burst_bench", "scripts/burst_rt"]
+SCRIPTS = ["scripts/burst_rt"]
 
 
 setup(
