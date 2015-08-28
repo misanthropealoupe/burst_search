@@ -1,11 +1,10 @@
 from multiprocessing import Queue
 
-def _get_trigger_action(self,action):
+def get_trigger_action(self, action):
 	if action == 'print':
 		def action_fun(triggers, data):
 			print triggers
 		return action_fun
-		self._action = action_fun
 	elif action == 'show_plot_dm':
 		def action_fun(triggers, data):
 			for t in triggers:
@@ -36,7 +35,8 @@ def _get_trigger_action(self,action):
 
 class ActionHandler(object):
 	def __init__(self, modes, nhandle=5):
-		self._actions = [get_trigger_action(s.strip()) for s in modes.split(',')]
+		self._filename = "none"
+		self._actions = [get_trigger_action(self, s.strip()) for s in modes.split(',')]
 		self._aq = Queue()
 		self._nhandle = nhandle
 
@@ -46,5 +46,8 @@ class ActionHandler(object):
 	def __call__(triggers, data):
 		for i in xrange(0,nhandle):
 			triggers, data = self._aq.get()
-			a in self._actions:
-				a(triggers, data)
+			for a in self._actions:
+				try:
+					a(triggers, data)
+				except:
+					print "error in " + str(a)

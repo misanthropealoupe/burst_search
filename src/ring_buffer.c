@@ -32,6 +32,211 @@ float **matrix(long n, long m)
   return mat;
 }
 
+float *vector(int n)
+{
+  float *vec=(float *)malloc(sizeof(float)*n);
+  assert(vec);
+  memset(vec,0,n*sizeof(float));
+  return vec;
+}
+
+void get_omp_iminmax(int n,  int *imin, int *imax)
+{
+  int nthreads=omp_get_num_threads();
+  int myid=omp_get_thread_num();
+  int bs=n/nthreads;
+  *imin=myid*bs;
+  *imax=(myid+1)*bs;
+  if (*imax>n)
+    *imax=n;
+
+}
+
+void clean_rows_2pass(float *vec, size_t nchan, size_t ndata)
+{
+  float **dat=(float **)malloc(sizeof(float *)*nchan);
+  for (int i=0;i<nchan;i++)
+    dat[i]=vec+i*ndata;
+  
+  float *tot=vector(ndata);
+  memset(tot,0,sizeof(tot[0])*ndata);
+
+  //find the common mode based on averaging over channels.
+  //inner loop is the natural one to parallelize over, but for some
+  //architectures/compilers doing so with a omp for is slow, hence
+  //rolling my own.
+#pragma omp parallel shared(ndata,nchan,dat,tot) default(none)
+  {
+    int imin,imax;
+    get_omp_iminmax(ndata,&imin,&imax);
+    
+    for (int i=0;i<nchan;i++)
+      for (int j=imin;j<imax;j++)
+  tot[j]+=dat[i][j];
+    
+    for (int j=imin;j<imax;j++)
+      tot[j]/=nchan;
+  }
+  //#define BURST_DUMP_DEBUG
+#ifdef BURST_DUMP_DEBUG
+  FILE *outfile=fopen("common_mode_1.dat","w");
+  fwrite(tot,sizeof(float),ndata,outfile);
+  fclose(outfile);
+#endif
+
+  float *amps=vector(nchan);
+  memset(amps,0,sizeof(amps[0])*nchan);
+  float totsqr=0;
+  for (int i=0;i<ndata;i++)
+    totsqr+=tot[i]*tot[i];
+
+  //find the best-fit amplitude for each channel
+#pragma omp parallel for shared(ndata,nchan,dat,tot,amps,totsqr) default(none)
+  for (int i=0;i<nchan;i++) {
+    float myamp=0;
+    for (int j=0;j<ndata;j++)
+      myamp+=dat[i][j]*tot[j];
+    myamp/=totsqr;
+    //for (int j=0;j<ndata;j++)
+    //   dat[i][j]-=tot[j]*myamp;
+    amps[i]=myamp;    
+  }
+
+#ifdef BURST_DUMP_DEBUG
+  outfile=fopen("mean_responses1.txt","w");
+  for (int i=0;i<nchan;i++)
+    fprintf(outfile,"%12.4f\n",amps[i]);
+  fclose(outfile);
+#endif
+
+  //decide that channels with amplitude between 0.5 and 1.5 are the good ones.
+  //recalculate the common mode based on those guys, with appropriate calibration
+  memset(tot,0,sizeof(tot[0])*ndata);
+  float amp_min=0.5;
+  float amp_max=1.5;
+#pragma omp parallel shared(ndata,nchan,amps,dat,tot,amp_min,amp_max) default(none)
+  {
+    int imin,imax;
+    get_omp_iminmax(ndata,&imin,&imax);
+
+    for (int i=0;i<nchan;i++) {
+      if ((amps[i]>amp_min)&&(amps[i]<amp_max))
+  for (int j=imin;j<imax;j++)
+    tot[j]+=dat[i][j]/amps[i];
+    }
+  }
+  float tot_sum=0;
+  for (int i=0;i<nchan;i++)
+    if ((amps[i]>amp_min)&&(amps[i]<amp_max))
+      tot_sum+=1./amps[i];
+  totsqr=0;
+  for (int i=0;i<ndata;i++) {
+    tot[i]/=tot_sum;
+    totsqr+=tot[i]*tot[i];
+  }
+  
+#ifdef BURST_DUMP_DEBUG
+  outfile=fopen("common_mode_2.dat","w");
+  fwrite(tot,sizeof(float),ndata,outfile);
+  fclose(outfile);
+
+  {
+    float *chansum=vector(nchan);
+    float *chansumsqr=vector(nchan);
+#pragma omp parallel for
+    for (int i=0;i<nchan;i++)
+      for (int j=0;j<ndata;j++) {
+  chansum[i]+=dat[i][j];
+  chansumsqr[i]+=dat[i][j]*dat[i][j];
+      }
+    outfile=fopen("chan_variances_pre.txt","w");
+    for (int i=0;i<nchan;i++)
+      fprintf(outfile,"%12.6e\n",sqrt(chansumsqr[i]-chansum[i]*chansum[i]/ndata));
+    fclose(outfile);
+    free(chansum);
+    free(chansumsqr);
+  }
+#endif
+
+
+
+  memset(amps,0,sizeof(amps[0])*nchan);
+#pragma omp parallel for shared(ndata,nchan,amps,dat,tot,totsqr) default(none)
+  for (int i=0;i<nchan;i++) {
+    float myamp=0;
+    for (int j=0;j<ndata;j++) 
+      myamp+=dat[i][j]*tot[j];
+    myamp/=totsqr;
+    amps[i]=myamp;
+    for (int j=0;j<ndata;j++)
+      dat[i][j]-=tot[j]*myamp;
+  }
+  
+#ifdef BURST_DUMP_DEBUG
+  outfile=fopen("mean_responses2.txt","w");
+  for (int i=0;i<nchan;i++)
+    fprintf(outfile,"%12.4f\n",amps[i]);
+  fclose(outfile);
+
+
+  {
+    float *chansum=vector(nchan);
+    float *chansumsqr=vector(nchan);
+#pragma omp parallel for
+    for (int i=0;i<nchan;i++)
+      for (int j=0;j<ndata;j++) {
+  chansum[i]+=dat[i][j];
+  chansumsqr[i]+=dat[i][j]*dat[i][j];
+      }
+    outfile=fopen("chan_variances_post.txt","w");
+    for (int i=0;i<nchan;i++)
+      fprintf(outfile,"%12.6e\n",sqrt(chansumsqr[i]-chansum[i]*chansum[i]/ndata));
+    fclose(outfile);
+    free(chansum);
+    free(chansumsqr);
+  }
+
+
+  #endif
+  
+  
+
+
+  free(amps);
+  free(tot);
+  
+}
+
+float get_diagonal_dm(Data *dat) {
+  //diagonal DM is when the delay between adjacent channels
+  //is equal to the sampling time
+  //delay = dm0*dm/nu^2
+  // delta delay = dm0*dm*(1//nu1^2 - 1/nu2^2) = dt
+  float d1=1.0/dat->chans[0]/dat->chans[0];
+  float d2=1.0/dat->chans[1]/dat->chans[1];
+  float dm_max=dat->dt/DM0/(d2-d1);
+  return dm_max;
+}
+
+int get_nchan_from_depth(int depth)
+{
+  int i=1;
+  return i<<depth;
+}
+
+float get_diagonal_dm_simple(float nu1, float nu2, float dt, int depth)
+{
+  float d1=1.0/nu1/nu1;
+  float d2=1.0/nu2/nu2;
+  int nchan=get_nchan_from_depth(depth);
+  //printf("nchan is %d from %d\n",nchan,depth);
+  //printf("freqs are %12.4f %12.4f\n",nu1,nu2);
+  float dm_max=dt/DM0/( (d2-d1)/nchan);
+  //printf("current dm is %12.4f\n",dm_max);
+  return fabs(dm_max);
+  
+}
+
 int get_npass(int n)
 {
   int nn=0;
@@ -195,18 +400,29 @@ void dedisperse_kernel_lagged(float **in, float **out, int n, int m, int s)
 	for (int i = m; i < m+s; i++)
 	    out[jj][i] = in[2*jj][i-s];
 
+    
+    // for(int i =0; i < n; i++){
+    //   printf("dimension, max reached %i x %i, %i\n",n,m,m + i - 1);
+    //   printf("in %i, %f\n",i,in[i][m + i - 1]);
+    //   printf("ou %i, %f\n",i,out[i][m + i - 1]);
+    // }
+
+
 	for (int i = 0; i < s+1; i++)
 	    out[jj+npair][i] = in[2*jj+1][i];
+
 	for (int i = s+1; i < m; i++)
 	    out[jj+npair][i] = in[2*jj][i-s-1] + in[2*jj+1][i];
 	for (int i = m; i < m+s+1; i++)
 	    out[jj+npair][i] = in[2*jj][i-s-1];
+      
+
     }
 }
 
 /*
  * Incremental dedispersion is implemented as two steps:
- * dedisperse_lagged() -> udpate_ring_buffer().
+ * dedisperse_lagged() -> update_ring_buffer().
  *
  * @inin is an (nchan, ndat) array
  * @outout is a non-rectangular array: outout[j] points to a buffer of length ndat+j (or larger)
@@ -229,18 +445,21 @@ void dedisperse_lagged(float **inin, float **outout, int nchan, int ndat)
     int npass = get_npass(nchan);
     assert(nchan == (1 << npass));   // currently require nchan to be a power of two
 
+
+
     int bs = nchan;
     float **in = inin;
     float **out = outout;
 
     for (int i = 0; i < npass; i++) {    
-  for (int j = 0; j < nchan; j += bs)
-      dedisperse_kernel_lagged(in+j, out+j, bs, ndat + j/bs, j/bs);
+      for (int j = 0; j < nchan; j += bs)
+          dedisperse_kernel_lagged(in+j, out+j, bs, ndat + j/bs, j/bs);
 
-  float **tmp=in;
-  in = out;
-  out = tmp;
-  bs /= 2;
+
+      float **tmp=in;
+      in = out;
+      out = tmp;
+      bs /= 2;
     } 
 
     // non-rectangular copy
@@ -331,24 +550,40 @@ void update_ring_buffer(float **chunk, float **ring_buffer, int nchan, int nchun
 void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_buffer_data, int ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth)
 {
 
-	Data *dat=put_data_into_burst_struct(indata,chunk_size,nfreq,chan_map,depth);
+	Data *dat=put_data_into_burst_struct(indata,chunk_size + get_nchan_from_depth(depth),nfreq,chan_map,depth);
 	remap_data(dat);
-	float** ring_buffer = malloc(sizeof(float*)*dat->nchan);
-	make_rect_mat(ring_buffer,ring_buffer_data,dat->nchan,ring_length);
+     int nchan = dat->nchan;
+	float** ring_buffer = malloc(sizeof(float*)*nchan);
+	make_rect_mat(ring_buffer,ring_buffer_data,nchan,ring_length);
 
 	//allocate the triangular matrix for output
-	int nchan = dat->nchan;
-	float* tmp = malloc((nfreq*chunk_size + (nfreq*(nfreq - 1))/2)*sizeof(float));
+	//float* tmp = malloc((nchan*chunk_size + (nchan*(nchan - 1))/2)*sizeof(float));
+     float* tmp = malloc(nchan*(chunk_size + nchan)*sizeof(float));
 	float** tmp_mat = malloc(nchan*sizeof(float*));
-	make_triangular_mat(tmp_mat,tmp,nchan,chunk_size,1);
-	dedisperse_lagged(dat->data,tmp,nchan,chunk_size);
-	update_ring_buffer(tmp,ring_buffer,dat->nchan,chunk_size,ring_length,&ringt0);
-	
-	float ** out_mat = malloc(sizeof(float*)*dat->nchan);
-	make_rect_mat(out_mat,outdata,dat->nchan,chunk_size);
-	for(int i = 0; i < dat->nchan; i++)
-		memcpy(out_mat[i],ring_buffer[i] + (ringt0 - chunk_size),(ringt0 - i));
+	//make_triangular_mat(tmp_mat,tmp,nchan,chunk_size,1);
+     make_rect_mat(tmp_mat, tmp, nchan, chunk_size + nchan);
+
+	dedisperse_lagged(dat->data,tmp_mat,nchan,chunk_size);
+	update_ring_buffer(tmp_mat,ring_buffer,nchan,chunk_size,ring_length,&ringt0);
+
+     printf("ping 1\n");
+
+	//float ** out_mat = malloc(sizeof(float*)*dat->nchan);
+	//make_rect_mat(out_mat,outdata,dat->nchan,chunk_size);
+
+     //probably not the most efficient way to use the output array
+     //stop copying if data is incomplete
+     //also prevents overlap
+	for(int i = 0; i < min(dat->nchan,chunk_size); i++){
+
+          //printf("channel %i\n",i);
+		memcpy(outdata + i*chunk_size, ring_buffer[i] + (ringt0 - chunk_size), (chunk_size - i)*sizeof(float));
+    }
+
+     printf("ping 2\n");
 	free(tmp);
+     free(tmp_mat);
+     free(ring_buffer);
 }
 
 /*--------------------------------------------------------------------------------*/

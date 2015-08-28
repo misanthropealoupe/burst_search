@@ -1,4 +1,5 @@
 import numpy as np
+import time
 
 cimport numpy as np
 cimport cython
@@ -165,7 +166,7 @@ class RingBuffer(object):
 
 		cdef:
 			int nfreq = self._nfreq
-			int ntime = data.shape[1]
+			int ntime = self._chunk_length
 
 			float delta_t = self.delta_t
 			float freq0 = self.freq0
@@ -178,13 +179,18 @@ class RingBuffer(object):
 			np.ndarray[ndim=1, dtype=CM_DTYPE_t] chan_map
 			np.ndarray[ndim=2, dtype=DTYPE_t] out
 			np.ndarray[ndim=2, dtype=DTYPE_t] ring_buffer
+			np.ndarray[ndim=2, dtype=DTYPE_t] data_pad
 
 		chan_map = self._chan_map
 		out = np.empty(shape=(ndm, self._chunk_length), dtype=DTYPE)
 		ring_buffer = self._ring_buffer
+		data_pad = np.empty(shape=(self._nfreq, self._chunk_length + ndm), dtype=DTYPE)
+		data_pad[:,:self._chunk_length] = data[:,:]
 
+		print "dedispersing"
+		t1 = time.time()
 		add_to_ring(
-			<DTYPE_t *> data.data,
+			<DTYPE_t *> data_pad.data,
 			<DTYPE_t *> out.data,
 			<CM_DTYPE_t *> chan_map.data,
 			<DTYPE_t *> ring_buffer.data,
@@ -197,7 +203,10 @@ class RingBuffer(object):
 			delta_f,
 			depth,
 			)
-
+		delt = time.time() - t1
+		print "dedisperse of {0}s took {1}s".format(self.delta_t*self._chunk_length, delt)
+		print "fraction of real time: {0}".format(self.delta_t*float(self._chunk_length)/(delt))
+		del data_pad
 		#save the state of ring
 		self._ringt0 = ringt0
 		self._ring_buffer = ring_buffer
