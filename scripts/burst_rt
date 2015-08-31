@@ -17,9 +17,6 @@ from burst_search.ringbuffer import RingBuffer
 from burst_search.actionhandler import ActionHandler
 import burst_search.search as search
 
-from guppy import hpy
-h=hpy()
-
 # Command line arguments.
 parser = argparse.ArgumentParser(description='Search real-time feed or chime-like data file for transients')
 parser.add_argument(

@@ -2,9 +2,6 @@
 import numpy as np
 import time
 
-from guppy import hpy
-h=hpy()
-
 cimport numpy as np
 cimport cython
 

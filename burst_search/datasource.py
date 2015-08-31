@@ -4,9 +4,6 @@ import random
 import sys
 from simulate import inject_square_event_chunk, disp_delay
 
-from guppy import hpy
-h=hpy()
-
 frame_cadence = 2.56e-6
 def mk_packet_dtype(nframe, nfreq, ninput):
 
