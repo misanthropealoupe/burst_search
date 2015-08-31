@@ -12,9 +12,13 @@ from burst_search import guppi
 from multiprocessing import Process
 from burst_search import datasource
 from burst_search.datasource import FileChimeSource
+from burst_search.datasource import RandSource
 from burst_search.ringbuffer import RingBuffer
 from burst_search.actionhandler import ActionHandler
 import burst_search.search as search
+
+from guppy import hpy
+h=hpy()
 
 # Command line arguments.
 parser = argparse.ArgumentParser(description='Search real-time feed or chime-like data file for transients')
@@ -53,7 +57,7 @@ parser.add_argument(
 parser.add_argument(
 	"--ring_length",
 	type=int,
-	default=16*1024
+	default=17*1024
 	)
 #Cadence sample units
 parser.add_argument(
@@ -76,6 +80,31 @@ def do_forever(source,f):
 	while source.active:
 		f()
 
+def discard_empty(ds,rb,ah,chunk_length,snr_min,min_dm):
+	# h1 = h.heap()
+	spec_dat = ds.get_block(chunk_length)
+	# print "get block"
+	# print h.heap() - h1
+	# h1 = h.heap()
+	dm_dat = rb(spec_dat)
+	# print "ring buffer"
+	# print h.heap() - h1
+
+	triggers = search.basic(dm_dat, snr_threshold = snr_min, min_dm = min_dm)
+	if len(triggers) > 0:
+		print "====================="
+		print "triggers %i" % len(triggers)
+		print "====================="
+	if len(triggers) == 0:
+		# h1 = h.heap()
+		del spec_dat
+		del dm_dat
+		del triggers
+		# print "deletes"
+		# print h.heap() - h1
+		return
+	ah(triggers)
+
 if __name__ == "__main__":
 	args = parser.parse_args()
 	files = args.files
@@ -91,17 +120,22 @@ if __name__ == "__main__":
 	for f in files:
 		ah = ActionHandler(modes='save_plot_dm, print')
 		#def __init__(self,chunk_size,buffer_size,delta_t, nfreq, freq0, delta_f, max_dm):
-		ds = FileChimeSource(chunk_length, f)
-		print "Using effective cadence: %f" % ds.set_num_packs(cadence)
-		frame_cadence = datasource.frame_cadence
-		npacks = ds.npacks
-		rb = RingBuffer(chunk_length, ring_length, ds.eff_cadence, ds.nfreq, ds.freq0, bw/float(ds.nfreq),max_dm)
+		#ds = FileChimeSource(chunk_length, f)
+		ds = RandSource(1024, chunk_length, sim=True,flux=100.0,sim_prob=1.0)
+		#print "Using effective cadence: %f" % ds.set_num_packs(cadence)
+		#frame_cadence = datasource.frame_cadence
+		#rb = RingBuffer(chunk_length, ring_length, ds.eff_cadence, ds.nfreq, ds.freq0, bw/float(ds.nfreq),max_dm)
+		rb = RingBuffer(chunk_length, ring_length, 0.001, 1024, 400.0, 400.0/1024.0, max_dm)
 
-		rs = lambda: search.basic_triangle(rb(ds.get_intensity_cadence_block(chunk_length)), snr_threshold = snr_min, min_dm = min_dm)
-		f = lambda: do_forever(ds,rs)
+		search_fun = lambda: discard_empty(ds,rb,ah,chunk_length,snr_min,min_dm)
+		f = lambda: do_forever(ds,search_fun)
+		handle_actions = lambda: do_forever(source=ah,f=ah)
 
-		p = Process(target=f)
-		p.start()
-		p.join()
+		#p = Process(target=search_fun)
+		p1 = Process(target=f)
+		p2 = Process(target=handle_actions)
+		p1.start()
+		p2.start()
+		p1.join()
 		#p.jo
 

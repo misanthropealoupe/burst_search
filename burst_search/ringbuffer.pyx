@@ -1,8 +1,14 @@
+
 import numpy as np
 import time
 
+from guppy import hpy
+h=hpy()
+
 cimport numpy as np
 cimport cython
+
+cimport cython.mem.PyMem_Free
 
 np.import_array()
 
@@ -16,8 +22,10 @@ ctypedef np.int64_t CM_DTYPE_t
 #ctypedef extern struct Peak;
 
 # C prototypes.
+cdef extern void PyMem_Free(void * ptr)
+
 cdef extern void add_to_ring(DTYPE_t * indata, DTYPE_t * outdata, CM_DTYPE_t *chan_map,
-		DTYPE_t *outdata, int ring_t0, int chunk_size, int ntime, float delta_t, size_t nfreq,
+		DTYPE_t *outdata, int * ring_t0, int chunk_size, int ntime, float delta_t, size_t nfreq,
 		float freq0, float delta_f, int depth)
 
 cdef extern int burst_get_num_dispersions(size_t nfreq, float freq0,
@@ -71,6 +79,10 @@ class DMData(object):
 		self._dm0 = dm0
 		self._delta_dm = delta_dm
 
+	def __del__(self):
+		del self._spec_data
+		del self._dm_data
+
 	@classmethod
 	def from_hdf5(cls, group):
 		delta_t = group.attrs['delta_t']
@@ -122,7 +134,7 @@ class RingBuffer(object):
 		return self._depth
 
 	def __init__(self, chunk_length, buffer_length, delta_t, nfreq, freq0, delta_f, max_dm):
-
+		#h1 = h.heap()
 		cdef:
 			float cdelta_t = delta_t
 			int cnfreq = nfreq
@@ -138,16 +150,17 @@ class RingBuffer(object):
 			int cndm =  burst_get_num_dispersions(cnfreq, cfreq0, cdelta_f, depth)
 
 			np.ndarray[ndim=1, dtype=CM_DTYPE_t] chan_map
-			
 
 			np.ndarray[ndim=2, dtype=DTYPE_t] ring_buffer
 		chan_map = np.empty(2**depth, dtype=CM_DTYPE)
-		ring_buffer = np.empty(shape=(cndm, buffer_length), dtype=DTYPE)
-
+		ring_buffer = np.zeros(shape=(cndm, buffer_length), dtype=DTYPE)
+		self.ring_buffer = ring_buffer
+		#print "rb alloc"
+		#print h.heap() - h1
+		#del h1
 
 		burst_setup_channel_mapping(<CM_DTYPE_t *> chan_map.data, cnfreq, cfreq0,
 				cdelta_f, depth)
-		self._ring_buffer = ring_buffer
 		self._chan_map = chan_map
 		self._delta_t = delta_t
 		self._nfreq = nfreq
@@ -163,7 +176,7 @@ class RingBuffer(object):
 
 	def __call__(self, np.ndarray[ndim=2, dtype=DTYPE_t] data not None):
 		assert self._chunk_length == data.shape[1]
-
+		#h1 = h.heap()
 		cdef:
 			int nfreq = self._nfreq
 			int ntime = self._chunk_length
@@ -178,23 +191,28 @@ class RingBuffer(object):
 
 			np.ndarray[ndim=1, dtype=CM_DTYPE_t] chan_map
 			np.ndarray[ndim=2, dtype=DTYPE_t] out
-			np.ndarray[ndim=2, dtype=DTYPE_t] ring_buffer
-			np.ndarray[ndim=2, dtype=DTYPE_t] data_pad
+			np.ndarray[ndim=2, dtype=DTYPE_t] ring_buffer = self.ring_buffer
 
 		chan_map = self._chan_map
-		out = np.empty(shape=(ndm, self._chunk_length), dtype=DTYPE)
-		ring_buffer = self._ring_buffer
-		data_pad = np.empty(shape=(self._nfreq, self._chunk_length + ndm), dtype=DTYPE)
-		data_pad[:,:self._chunk_length] = data[:,:]
+		out = np.zeros(shape=(ndm, self._chunk_length + ndm), dtype=DTYPE)
+		#print "dd setup"
+		#print h.heap() - h1
+		#ring_buffer = self._ring_buffer
+		#rb_dat = self._ring_buffer.data
+		#data_pad = np.zeros(shape=(self._nfreq, self._chunk_length + ndm), dtype=DTYPE)
+		#data_pad[:,:self._chunk_length] = data[:,:]
 
+		print self.ring_buffer.shape
+		#print np.ascontiguousarray(data[:,:]).shape
 		print "dedispersing"
+		#h1 = h.heap()
 		t1 = time.time()
 		add_to_ring(
-			<DTYPE_t *> data_pad.data,
+			<DTYPE_t *> data.data,
 			<DTYPE_t *> out.data,
 			<CM_DTYPE_t *> chan_map.data,
 			<DTYPE_t *> ring_buffer.data,
-			ringt0,
+			&ringt0,
 			chunk_size,
 			ntime,
 			delta_t,
@@ -206,12 +224,17 @@ class RingBuffer(object):
 		delt = time.time() - t1
 		print "dedisperse of {0}s took {1}s".format(self.delta_t*self._chunk_length, delt)
 		print "fraction of real time: {0}".format(self.delta_t*float(self._chunk_length)/(delt))
-		del data_pad
+		#print h.heap() - h1
 		#save the state of ring
 		self._ringt0 = ringt0
-		self._ring_buffer = ring_buffer
+		self.ring_buffer = ring_buffer
+		#PyMem_Free(ring_buffer.data)
 
-		dm_data = np.ascontiguousarray(out[:,:ntime])
+		#h1 = h.heap()
+		#dm_data = np.ascontiguousarray(out[:,:ntime])
+		dm_data = np.ascontiguousarray(out[:,:])
+
+		#needs accurate spacing
 		spec_data = np.ascontiguousarray(data[:, :ntime])
 
 		dm0 = 0
@@ -221,5 +244,7 @@ class RingBuffer(object):
 		out_cont = DMData(spec_data, dm_data, delta_t, freq0, delta_f, dm0,
 						  delta_dm)
 
+		#print "out products"
+		#print h.heap() - h1
 		return out_cont
 

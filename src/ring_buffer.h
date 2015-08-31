@@ -43,6 +43,6 @@ size_t find_peak_wrapper_triangle(float *data, int nchan, int ndata, float *peak
 size_t burst_get_num_dispersions(size_t nfreq, float freq0,float delta_f, int depth);
 void clean_rows_2pass(float *vec, size_t nchan, size_t ndata);
 int burst_depth_for_max_dm(float max_dm, float delta_t, size_t nfreq, float freq0,float delta_f);
-void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_buffer_data, int ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth);
+void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_buffer_data, int * ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth);
 void burst_setup_channel_mapping(CM_DTYPE *chan_map, size_t nfreq, float freq0, float delta_f, int depth);
 #endif

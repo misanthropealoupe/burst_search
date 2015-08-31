@@ -69,16 +69,18 @@ def basic(data, snr_threshold=5., min_dm=50.,spec_ind=None):
     triggers = []
 
     # Sievers' code breaks of number of channels exceeds number of samples.
-    if data.dm_data.shape[0] < data.dm_data.shape[1]:
-        # Find the index of the *min_dm*.
-        min_dm_ind = (min_dm - data.dm0) / data.delta_dm
-        min_dm_ind = int(round(min_dm_ind))
-        min_dm_ind = max(0, min_dm_ind)
+    #if data.dm_data.shape[0] < data.dm_data.shape[1]:
+    # Find the index of the *min_dm*.
+    min_dm_ind = (min_dm - data.dm0) / data.delta_dm
+    min_dm_ind = int(round(min_dm_ind))
+    min_dm_ind = max(0, min_dm_ind)
 
-        snr, sample, duration = _search.sievers_find_peak(data, min_dm_ind)
+    snr, sample, duration = _search.sievers_find_peak(data, min_dm_ind)
 
-        if snr > snr_threshold:
-            triggers.append(Trigger(data, sample, snr,spec_ind=spec_ind))
+    print "best snr: {0}".format(snr)
+
+    if snr > snr_threshold:
+        triggers.append(Trigger(data, sample, snr,spec_ind=spec_ind))
 
     return triggers
 
@@ -94,15 +96,16 @@ def basic_triangle(data, snr_threshold=5., min_dm=50.,spec_ind=None):
     triggers = []
 
     # Sievers' code breaks of number of channels exceeds number of samples.
-    if data.dm_data.shape[0] < data.dm_data.shape[1]:
-        # Find the index of the *min_dm*.
-        min_dm_ind = (min_dm - data.dm0) / data.delta_dm
-        min_dm_ind = int(round(min_dm_ind))
-        min_dm_ind = max(0, min_dm_ind)
+    #if data.dm_data.shape[0] < data.dm_data.shape[1]:
 
-        snr, sample, duration = _search.sievers_find_peak(data, min_dm_ind)
+    # Find the index of the *min_dm*.
+    min_dm_ind = (min_dm - data.dm0) / data.delta_dm
+    min_dm_ind = int(round(min_dm_ind))
+    min_dm_ind = max(0, min_dm_ind)
 
-        if snr > snr_threshold:
-            triggers.append(Trigger(data, sample, snr,spec_ind=spec_ind))
+    snr, sample, duration = _search.sievers_find_peak_triangle(data, min_dm_ind)
+
+    if snr > snr_threshold:
+        triggers.append(Trigger(data, sample, snr,spec_ind=spec_ind))
 
     return triggers

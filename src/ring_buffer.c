@@ -452,6 +452,8 @@ void dedisperse_lagged(float **inin, float **outout, int nchan, int ndat)
     float **out = outout;
 
     for (int i = 0; i < npass; i++) {    
+
+  #pragma omp parallel for
       for (int j = 0; j < nchan; j += bs)
           dedisperse_kernel_lagged(in+j, out+j, bs, ndat + j/bs, j/bs);
 
@@ -464,7 +466,7 @@ void dedisperse_lagged(float **inin, float **outout, int nchan, int ndat)
 
     // non-rectangular copy
     for (int j = 0; j < nchan; j++)
-  memcpy(out[j], in[j], (ndat+j) * sizeof(float));
+      memcpy(out[j], in[j], (ndat+j)*sizeof(float));
 }
 
 /*
@@ -546,13 +548,28 @@ void update_ring_buffer(float **chunk, float **ring_buffer, int nchan, int nchun
 /* returns data starting at a ringt0 - chunk_size after one call
 *   Note that ringt0 corresponds to the value of ringt0 after the call
 *   to update_ring_buffer.
+*   indata does not have the correct (padded size)
 */
-void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_buffer_data, int ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth)
+void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_buffer_data, int * ringt0, int chunk_size, int ring_length, float delta_t, size_t nfreq, float freq0, float delta_f, int depth)
 {
+     omp_set_dynamic(0);
+     omp_set_num_threads(8);
 
-	Data *dat=put_data_into_burst_struct(indata,chunk_size + get_nchan_from_depth(depth),nfreq,chan_map,depth);
+
+     //zero-pad data
+     int ndm = get_nchan_from_depth(depth);
+     float * indata_pad = malloc(sizeof(float)*nfreq*(chunk_size + ndm));
+     for(int i = 0; i < nfreq; i++){
+       memcpy(indata_pad + i*(chunk_size + ndm), indata + i*chunk_size,sizeof(float)*chunk_size);
+       memset(indata_pad + i*(chunk_size + ndm) + chunk_size,0,sizeof(float)*(ndm));
+     }
+
+
+	Data *dat=put_data_into_burst_struct(indata_pad,chunk_size + ndm,nfreq,chan_map,depth);
 	remap_data(dat);
      int nchan = dat->nchan;
+
+
 	float** ring_buffer = malloc(sizeof(float*)*nchan);
 	make_rect_mat(ring_buffer,ring_buffer_data,nchan,ring_length);
 
@@ -564,7 +581,7 @@ void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_
      make_rect_mat(tmp_mat, tmp, nchan, chunk_size + nchan);
 
 	dedisperse_lagged(dat->data,tmp_mat,nchan,chunk_size);
-	update_ring_buffer(tmp_mat,ring_buffer,nchan,chunk_size,ring_length,&ringt0);
+	update_ring_buffer(tmp_mat,ring_buffer,nchan,chunk_size,ring_length,ringt0);
 
      printf("ping 1\n");
 
@@ -572,16 +589,33 @@ void add_to_ring(DTYPE* indata, DTYPE* outdata, CM_DTYPE* chan_map, DTYPE* ring_
 	//make_rect_mat(out_mat,outdata,dat->nchan,chunk_size);
 
      //probably not the most efficient way to use the output array
-     //stop copying if data is incomplete
-     //also prevents overlap
+     //does not stop copying if data is incomplete
+     //does not prevent overlap
+     //ring buffer must be long enough
+
+     //because of the search padding requirement...
 	for(int i = 0; i < min(dat->nchan,chunk_size); i++){
-
-          //printf("channel %i\n",i);
-		memcpy(outdata + i*chunk_size, ring_buffer[i] + (ringt0 - chunk_size), (chunk_size - i)*sizeof(float));
+          int src0 = *ringt0 - chunk_size - i % ring_length;
+          int src1 = *ringt0 - i % ring_length;
+          if (src1 < src0){
+           int first_cpy = (ring_length - src0);
+           int second_cpy = chunk_size - first_cpy;
+           memcpy(outdata + i*(chunk_size + nchan), ring_buffer[i] + src0, first_cpy*sizeof(float));
+           memcpy(outdata + i*(chunk_size + nchan) + first_cpy, ring_buffer[i] + src0 + first_cpy, (second_cpy)*sizeof(float));
+          }
+          else{
+		 memcpy(outdata + i*(chunk_size + nchan), ring_buffer[i] + src0, (chunk_size)*sizeof(float));
+          }
     }
-
      printf("ping 2\n");
+     free(dat->data[0]);
+     free(dat->data);
+     free(dat->raw_data[0]);
+     free(dat->raw_data);
+     free(dat);
 	free(tmp);
+     free(indata_pad);
+     //free(tmp_mat[0]);
      free(tmp_mat);
      free(ring_buffer);
 }
@@ -848,7 +882,7 @@ Peak find_peak(Data *dat)
     mybest.snr=0;
 #pragma omp for
     for (int i=0;i<dat->nchan;i++) {
-      Peak dm_best=find_peaks_wnoise_onedm(dat->data[i],dat->ndata-dat->nchan,max_depth,0);
+      Peak dm_best=find_peaks_wnoise_onedm(dat->data[i],dat->ndata - dat->nchan,max_depth,0);
       if (dm_best.snr>mybest.snr) {
 	mybest=dm_best;
 	mybest.dm_channel=i;

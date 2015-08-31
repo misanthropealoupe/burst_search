@@ -9,6 +9,28 @@ exclusion_sd =  100
 #needs to be included in some telescope/dataset parameter file
 gain = 2.000 # K/Jy
 
+kdm = 4.149*(10.0**3)
+
+#t0 corresponds to the max freq arrival time
+#t0 is taken relative to the start of the chunk
+def inject_square_event_chunk(dat, dm, chunk_length, t0, t_width, flux, fmax, fmin, df, dt):
+	try:
+		df = abs(df)
+		f_cmax = f_int(dm,-t0*dt,fmax)
+		f_cmin = f_int(dm,chunk_length*dt,f_cmax)
+		f_cmin = max(f_cmin,fmin)
+		print "fmax, fmin: {0}, {1}".format(f_cmax,f_cmin)
+		assert(f_cmax <= fmax and f_cmin >= fmin)
+	except:
+		print "sim failed"
+		return
+	for i in xrange(int((fmax - f_cmax + np.finfo(np.float32).eps)/df), int((fmax - f_cmin)/df)):
+		delay = int((disp_delay(-i*df + fmax,dm) - disp_delay(fmax,dm))/dt)
+		dat[i,t0 + delay: t0 + t_width + delay] += flux
+
+def f_int(dm,t,f):
+	return 1.0/math.sqrt(t/(kdm*dm) + math.pow(f, -2.0))
+
 class RandSource(object):
 	"""
 	An object to generate uniformly distributed random f-t data with dispersion.
@@ -193,7 +215,7 @@ class RandSource(object):
 
 def disp_delay(f,dm):
 	"""Compute the dispersion delay (s) as a function of frequency (MHz)"""
-	return 4.149*dm*(10.0**3)/(f**2)
+	return kdm*dm/(f**2)
 
 def uniform_range(center, halfwidth):
 	return random.uniform(center - halfwidth, center + halfwidth)

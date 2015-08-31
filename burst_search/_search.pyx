@@ -20,7 +20,6 @@ cdef extern size_t find_peak_wrapper_triangle(float *data, int nchan, int ndata,
 
 
 def sievers_find_peak(data, low_dm_exclude=1):
-
     cdef np.ndarray[ndim=2, dtype=DTYPE_t] dm_data
     cdef int ndm = data.dm_data.shape[0]
     cdef int ntime = data.dm_data.shape[1]

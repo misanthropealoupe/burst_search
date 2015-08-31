@@ -1,6 +1,11 @@
 from multiprocessing import Queue
 import numpy as np
+import random
+import sys
+from simulate import inject_square_event_chunk, disp_delay
 
+from guppy import hpy
+h=hpy()
 
 frame_cadence = 2.56e-6
 def mk_packet_dtype(nframe, nfreq, ninput):
@@ -16,7 +21,12 @@ def decode(data):
 	cdata[..., 0] = (data / 16).view(np.int8) - 8
 	cdata[..., 1] = (data % 16).view(np.int8) - 8
 	cdata = cdata.reshape((-1,) + cdata.shape[2:])
-	return cdata
+	ret = cdata.astype(dtype=np.float32)
+	del cdata
+	return ret
+
+def dispersion_spread(dm,fmin,fmax):
+	return disp_delay(fmin,dm) - disp_delay(fmax,dm)
 
 def get_num_packs(desired_cadence, nframes):
 	return int(round(desired_cadence/frame_cadence))/nframes
@@ -31,6 +41,52 @@ class DataSource(object):
 
 	def __del__(self):
 		del self.queue
+
+class RandSource(DataSource):
+	def __init__(self, nfreq, chunk_size, same_data=False, sim=False, sim_prob = 0.1, flux=0.1, fmax = 800.0, fmin = 400.0,dm=300.0, cadence=0.001):
+		DataSource(chunk_size)
+		self._chunk_size = chunk_size
+		self._same_data = same_data
+		self._nfreq = nfreq
+		self._df = (fmax - fmin)/float(nfreq)
+		self.t = 0
+
+		self._sim = sim
+		self._sim_prob = sim_prob
+		self._sim_t0 = 0
+		self._event = False
+		self._event_dm = dm
+		self._fmax = fmax
+		self._fmin = fmin
+		self._flux = flux
+		self._dt = cadence
+		if same_data:
+			self._dat = np.random.rand(self._nfreq,self._chunk_size).astype(np.float32)
+
+	def get_block(self,useless=0):
+		if self._same_data:
+			dat = self._dat
+		else:
+			dat = np.random.rand(self._nfreq,self._chunk_size).astype(np.float32)
+
+		if(self._sim):
+			if not self._event:
+				if random.random() < self._sim_prob:
+					self._event = True
+					self._sim_t0 = self.t
+			if self._event:
+				t0 = self._sim_t0 - self.t
+				if abs(t0) >= dispersion_spread(self._event_dm,self._fmin,self._fmax)/self._dt:
+					self._event = False
+
+				if self._event:
+					print "injecting event"
+					inject_square_event_chunk(dat, t0=t0, t_width=2, 
+						chunk_length = self._chunk_size,dm=self._event_dm,
+						flux=self._flux,df=self._df, fmax = self._fmax, fmin = self._fmin, dt=self._dt)
+
+		self.t += self._chunk_size
+		return dat
 
 class RtChimeSource(DataSource):
 	#NOT DONE
@@ -66,15 +122,29 @@ class FileChimeSource(DataSource):
 		self.queue.put(self.get_chunk())
 
 	#get a block with a specific length time axis (in 'effective cadence' units)
-	def get_intensity_cadence_block(self, num_t):
+	def get_block(self, num_t):
 		npackets = num_t*self.npacks
 		nframes = self.nframes
-		sumsqr = np.zeros((self.nfreq, num_t),dtype=np.float32)
+		h1 = h.heap()
+		sumsqr = np.zeros((self.nfreq, num_t), dtype=np.float32)
 		for i in xrange(0,num_t):
-			dat = self.get_chunk()['data']
+			print "chunk"
+			chunk = self.get_chunk()
+			print h.heap() - h1
+			h2 = h.heap()
+			print "dat"
+			dat = chunk['data']
+			print h.heap() - h2
+			print "decode"
+			h2 = h.heap()
 			raw = decode(dat)
+			print h.heap() - h2
 			del dat
 			sumsqr[:,i] = np.sum(np.sum(np.sum(np.square(raw),axis=0),axis=2),axis=1)
+			del chunk
+			del raw
+		print h.heap() - h1
+		print sys.getsizeof(sumsqr)
 		return sumsqr
 
 	def set_num_packs(self, desired_cadence):
@@ -94,20 +164,18 @@ class FileChimeSource(DataSource):
 			self.active = False
 			return
 
-
 		self.tframes += npkread * self.header['n_frames']
 		npb = np.fromstring(buf, dtype=self.pk_dtype)
+		del buf
 		valid = npb['valid']
 
 		if np.logical_and(valid != 0xffffffff, valid != 0).any():
 			#print "Corrupt data, or got confused about offset."
 			return None
 		return npb
-				#Do not check for lost packets
-				#if (valid == 0).any():
 
-	def __call__(self):
-		self.pull_chunk()
+	#def __call__(self):
+	#	self.pull_chunk()
 
 	def __del__(self):
 		#del self.queue

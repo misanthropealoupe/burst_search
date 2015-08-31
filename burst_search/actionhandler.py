@@ -39,12 +39,13 @@ class ActionHandler(object):
 		self._actions = [get_trigger_action(self, s.strip()) for s in modes.split(',')]
 		self._aq = Queue()
 		self._nhandle = nhandle
+		self.active = True
 
 	def put(triggers,data):
 		self._aq.put((triggers, data))
 
-	def __call__(triggers, data):
-		for i in xrange(0,nhandle):
+	def __call__(self):
+		for i in xrange(0,self._nhandle):
 			triggers, data = self._aq.get()
 			for a in self._actions:
 				try:
